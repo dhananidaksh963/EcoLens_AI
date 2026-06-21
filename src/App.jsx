@@ -39,7 +39,7 @@ function useFonts() {
 /* ---------------------------- THEME TOKENS ---------------------------- */
 const T = {
   bg: "#0A1612",
-  bgAlt: "#0F2419",
+  bgAlt: "#111E18",
   surface: "#F2EFE6",
   surfaceDim: "#E8E3D3",
   sage: "#5A8F69",
@@ -49,11 +49,11 @@ const T = {
   amber: "#E8A33D",
   amberLight: "#F2BE6E",
   coral: "#E2654F",
-  ink: "#0F2419",
+  ink: "#2C3E50",
   cream: "#F2EFE6",
   mist: "rgba(242,239,230,0.65)",
   mistDim: "rgba(242,239,230,0.4)",
-  line: "rgba(242,239,230,0.12)",
+  line: "rgba(0,0,0,0.1)",
 };
 
 const CATEGORY_META = {
@@ -581,7 +581,7 @@ function GlassCard({ children, style, className }) {
     <div
       className={className}
       style={{
-        background: "rgba(242,239,230,0.04)",
+        background: "rgba(242,239,230,0.06)",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
         border: `1px solid ${T.line}`,
@@ -768,7 +768,7 @@ function ScanlineHero({ setView }) {
           School Sustainability <span style={{ color: T.tealLight }}>Intelligence</span> Platform.
         </h1>
         <p style={{ fontFamily: "'Inter',sans-serif", fontSize: "clamp(15px, 1.8vw, 17.5px)", color: T.mist, lineHeight: 1.6, marginBottom: 36, maxWidth: 620 }}>
-          Go beyond basic emission estimators. EcoLens AI maps your building constraints, analyzes hidden resource risks, models multi-year SDG maps, and builds verifiable sustainability roadmaps.
+          See your school's environmental impact clearly. Enter campus data to get actionable insights for a greener future.
         </p>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <PrimaryButton onClick={() => setView("dashboard")} icon={ArrowRight}>Launch Intelligence Center</PrimaryButton>
@@ -991,6 +991,87 @@ function IconSelect({ value, onChange, options }) {
 function SchoolForm({ school, setSchool, onSubmit }) {
   const set = (k) => (e) => setSchool((s) => ({ ...s, [k]: e.target.value }));
   const fillSample = () => setSchool(SAMPLE_SCHOOL);
+  const [citySuggestions, setCitySuggestions] = useState([]);
+  const [cityLoading, setCityLoading] = useState(false);
+  const cityDebounceRef = useRef(null);
+  const [countrySuggestions, setCountrySuggestions] = useState([]);
+  const [countryLoading, setCountryLoading] = useState(false);
+  const countryDebounceRef = useRef(null);
+
+  const fetchCitySuggestions = async (query, countryFilter = null) => {
+    if (!query || query.length < 2) {
+      setCitySuggestions([]);
+      return;
+    }
+    setCityLoading(true);
+    try {
+      let url = `https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(query)}&type=city&limit=10&apiKey=${import.meta.env.VITE_GEOAPIFY_API_KEY}`;
+      // Add country filter if provided
+      if (countryFilter) {
+        url += `&filter=countrycode:${countryFilter.toLowerCase()}`;
+      }
+      const response = await fetch(url);
+      const data = await response.json();
+      setCitySuggestions(data.features?.map(f => ({
+        city: f.properties.city,
+        country: f.properties.country,
+        // Store full properties if needed for more detail
+      })) ?? []);
+    } catch (err) {
+      console.error('Geoapify city error:', err);
+      setCitySuggestions([]);
+    } finally {
+      setCityLoading(false);
+    }
+  };
+
+  const fetchCountrySuggestions = async (query) => {
+    if (!query || query.length < 2) {
+      setCountrySuggestions([]);
+      return;
+    }
+    setCountryLoading(true);
+    try {
+      const response = await fetch(
+        `https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(query)}&type=country&limit=5&apiKey=${import.meta.env.VITE_GEOAPIFY_API_KEY}`
+      );
+      const data = await response.json();
+      setCountrySuggestions(data.features?.map(f => f.properties.country) ?? []);
+    } catch (err) {
+      console.error('Geoapify country error:', err);
+      setCountrySuggestions([]);
+    } finally {
+      setCountryLoading(false);
+    }
+  };
+
+  const handleCityChange = (e) => {
+    const value = e.target.value;
+    set("city")(e);
+    if (cityDebounceRef.current) {
+      clearTimeout(cityDebounceRef.current);
+    }
+    cityDebounceRef.current = setTimeout(() => {
+      // Pass current country as filter if it exists
+      const countryFilter = school.country || null;
+      fetchCitySuggestions(value, countryFilter);
+    }, 300);
+  };
+
+  const handleCountryChange = (e) => {
+    const value = e.target.value;
+    set("country")(e);
+    if (countryDebounceRef.current) {
+      clearTimeout(countryDebounceRef.current);
+    }
+    countryDebounceRef.current = setTimeout(() => {
+      fetchCountrySuggestions(value);
+      // Refresh city suggestions with new country filter if there's a city value
+      if (school.city && school.city.length >= 2) {
+        fetchCitySuggestions(school.city, value);
+      }
+    }, 300);
+  };
 
   return (
     <GlassCard style={{ padding: 24, background: "rgba(15,36,25,0.2)" }}>
@@ -1007,14 +1088,115 @@ function SchoolForm({ school, setSchool, onSubmit }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <label style={{ display: "block", fontFamily: "'Inter',sans-serif", fontSize: 12, color: T.mist, marginBottom: 6 }}>City</label>
-            <input style={inputStyle} type="text" value={school.city} onChange={set("city")} placeholder="e.g. Doha" />
+            <div style={{ position: "relative" }}>
+              <input
+                style={inputStyle}
+                type="text"
+                value={school.city}
+                onChange={handleCityChange}
+                placeholder="e.g. Doha"
+              />
+              {cityLoading && (
+                <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: T.tealLight, fontSize: 12 }}>
+                  <span>⟳</span>
+                </div>
+              )}
+              {citySuggestions.length > 0 && (
+                <div style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  marginTop: 4,
+                  background: T.surface,
+                  border: `1px solid ${T.line}`,
+                  borderRadius: 8,
+                  zIndex: 10,
+                  maxHeight: 200,
+                  overflowY: "auto",
+                  boxSizing: "border-box"
+                }}>
+                  {citySuggestions.map((suggestion, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        borderBottom: idx === citySuggestions.length - 1 ? "none" : `1px solid ${T.line}`,
+                        background: T.surface,
+                        color: T.ink,
+                        fontSize: 13
+                      }}
+                      onClick={() => {
+                        setSchool(s => ({ ...s, city: suggestion.city, country: suggestion.country }));
+                        setCitySuggestions([]);
+                        if (cityDebounceRef.current) {
+                          clearTimeout(cityDebounceRef.current);
+                        }
+                      }}
+                    >
+                      {suggestion.city}, {suggestion.country}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div>
             <label style={{ display: "block", fontFamily: "'Inter',sans-serif", fontSize: 12, color: T.mist, marginBottom: 6 }}>Country</label>
-            <select style={inputStyle} value={school.country} onChange={set("country")}>
-              <option value="">Select country</option>
-              {Object.keys(CLIMATE_REFERENCE).filter(k => k !== "default").map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <div style={{ position: "relative" }}>
+              <input
+                style={inputStyle}
+                type="text"
+                value={school.country}
+                onChange={handleCountryChange}
+                placeholder="Select country"
+              />
+              {countryLoading && (
+                <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: T.tealLight, fontSize: 12 }}>
+                  <span>⟳</span>
+                </div>
+              )}
+              {countrySuggestions.length > 0 && (
+                <div style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  marginTop: 4,
+                  background: T.surface,
+                  border: `1px solid ${T.line}`,
+                  borderRadius: 8,
+                  zIndex: 10,
+                  maxHeight: 200,
+                  overflowY: "auto",
+                  boxSizing: "border-box"
+                }}>
+                  {countrySuggestions.map((suggestion, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        borderBottom: idx === countrySuggestions.length - 1 ? "none" : `1px solid ${T.line}`,
+                        background: T.surface,
+                        color: T.ink,
+                        fontSize: 13
+                      }}
+                      onClick={() => {
+                        setSchool(s => ({ ...s, country: suggestion }));
+                        setCountrySuggestions([]);
+                        if (countryDebounceRef.current) {
+                          clearTimeout(countryDebounceRef.current);
+                        }
+                      }}
+                    >
+                      {suggestion}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1030,33 +1212,33 @@ function SchoolForm({ school, setSchool, onSubmit }) {
         </div>
 
         <CircularSlider label="Green Canopy Cover" value={Number(school.greenCover) || 0} onChange={(v) => setSchool(s => ({ ...s, greenCover: String(v) }))} icon={TreePine} hint="Percentage of estate shaded by foliage" />
-        
+
         <div>
           <label style={{ display: "block", fontFamily: "'Inter',sans-serif", fontSize: 12, color: T.mist, marginBottom: 6 }}>Total Physical Blocks</label>
           <input style={inputStyle} type="number" value={school.buildings} onChange={set("buildings")} placeholder="3" />
         </div>
 
         <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, color: T.tealLight, marginBottom: 12 }}>Transit Modal Balance (%)</div>
-          <CircularSlider label="Single Car Share" value={Number(school.carPct) || 0} onChange={(v) => setSchool(s => ({ ...s, carPct: String(v) }))} color={T.coral} />
-          <CircularSlider label="Bus Network" value={Number(school.busPct) || 0} onChange={(v) => setSchool(s => ({ ...s, busPct: String(v) }))} color={T.amber} />
-          <CircularSlider label="Rail / Subway" value={Number(school.metroPct) || 0} onChange={(v) => setSchool(s => ({ ...s, metroPct: String(v) }))} color={T.teal} />
-          <CircularSlider label="Active (Walk/Bike)" value={Number(school.walkCyclePct) || 0} onChange={(v) => setSchool(s => ({ ...s, walkCyclePct: String(v) }))} color={T.sageLight} />
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, color: T.tealLight, marginBottom: 12 }}>How Students & Staff Get to School</div>
+          <CircularSlider label="% by Car" value={Number(school.carPct) || 0} onChange={(v) => setSchool(s => ({ ...s, carPct: String(v) }))} color={T.coral} />
+          <CircularSlider label="% by Bus" value={Number(school.busPct) || 0} onChange={(v) => setSchool(s => ({ ...s, busPct: String(v) }))} color={T.amber} />
+          <CircularSlider label="% by Train/Subway" value={Number(school.metroPct) || 0} onChange={(v) => setSchool(s => ({ ...s, metroPct: String(v) }))} color={T.teal} />
+          <CircularSlider label="% by Walk/Bike" value={Number(school.walkCyclePct) || 0} onChange={(v) => setSchool(s => ({ ...s, walkCyclePct: String(v) }))} color={T.sageLight} />
         </div>
 
         <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
-          <CircularSlider label="HVAC Active Runtime" min={0} max={24} suffix=" hrs/day" value={Number(school.acHours) || 0} onChange={(v) => setSchool(s => ({ ...s, acHours: String(v) }))} icon={Thermometer} />
+          <CircularSlider label="Heating & Cooling Hours/Day" min={0} max={24} suffix=" hrs/day" value={Number(school.acHours) || 0} onChange={(v) => setSchool(s => ({ ...s, acHours: String(v) }))} icon={Thermometer} />
         </div>
 
         <div>
-          <label style={{ display: "block", fontFamily: "'Inter',sans-serif", fontSize: 12, color: T.mist, marginBottom: 6 }}>Solid Waste Generation</label>
-          <SegmentedControl value={school.waste} onChange={(v) => setSchool(s => ({ ...s, waste: v }))} options={[{ value: "low", label: "Low Vol" }, { value: "medium", label: "Moderate" }, { value: "high", label: "High Volume" }]} />
+          <label style={{ display: "block", fontFamily: "'Inter',sans-serif", fontSize: 12, color: T.mist, marginBottom: 6 }}>Trash & Recycling</label>
+          <SegmentedControl value={school.waste} onChange={(v) => setSchool(s => ({ ...s, waste: v }))} options={[{ value: "low", label: "Low Amount" }, { value: "medium", label: "Medium Amount" }, { value: "high", label: "High Amount" }]} />
         </div>
 
         <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 600, color: T.tealLight, marginBottom: 12 }}>Water System Architecture</div>
           <CircularSlider label="Reported Daily Flow Volume" min={10} max={150} suffix=" L/capita" value={Number(school.waterLitersPerStudent) || 40} onChange={(v) => setSchool(s => ({ ...s, waterLitersPerStudent: String(v) }))} icon={Droplets} />
-          
+
           <div style={{ marginBottom: 10, marginTop: 10 }}>
             <label style={{ display: "block", fontFamily: "'Inter',sans-serif", fontSize: 12, color: T.mist, marginBottom: 6 }}>Campus Grounds Irrigation</label>
             <SegmentedControl value={school.irrigation} onChange={(v) => setSchool(s => ({ ...s, irrigation: v }))} options={[{ value: "yes", label: "Active Array" }, { value: "no", label: "None / Rainfed" }]} />
@@ -1099,6 +1281,79 @@ function SchoolForm({ school, setSchool, onSubmit }) {
 
 /* ============================== CONTEXT WEATHER INTEGRATION ============================== */
 function ContextCards({ school }) {
+  const [weatherData, setWeatherData] = useState(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState(null);
+
+  useEffect(() => {
+    // Fetch weather when city changes
+    if (school.city && school.city.trim() !== '') {
+      fetchWeatherData();
+    } else {
+      // Clear weather data if no city
+      setWeatherData(null);
+      setWeatherError(null);
+    }
+  }, [school.city, school.country]);
+
+  const fetchWeatherData = async () => {
+    setWeatherLoading(true);
+    setWeatherError(null);
+    try {
+      // Get OpenWeather API key from environment variable
+      const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY;
+
+      // If API key is not set or empty, show error
+      if (!apiKey || apiKey.trim() === '') {
+        setWeatherError('OpenWeather API key not configured. Please set VITE_OPENWEATHER_API_KEY in .env file');
+        setWeatherLoading(false);
+        return;
+      }
+
+      // Log for debugging (remove in production)
+      console.log('Fetching weather for:', { city: school.city, country: school.country });
+
+      const query = school.country ? `${school.city},${school.country}` : school.city;
+      const response = await fetch(
+        `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(query)}&appid=${apiKey}&units=metric`
+      );
+
+      if (!response.ok) {
+        // Try to get error details from response body
+        let errorDetails = `${response.status} - ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.message) {
+            errorDetails += `: ${errorData.message}`;
+          }
+        } catch (e) {
+          // Ignore if response body is not JSON
+        }
+        throw new Error(`Weather API error: ${errorDetails}`);
+      }
+
+      const data = await response.json();
+      setWeatherData({
+        temp: Math.round(data.main.temp),
+        condition: data.weather[0].main,
+        description: data.weather[0].description,
+        humidity: data.main.humidity,
+        icon: data.weather[0].icon
+      });
+    } catch (err) {
+      console.error('Weather API error:', err);
+      let errorMessage = 'Failed to load weather data';
+      if (err.message) {
+        errorMessage += `: ${err.message}`;
+      }
+      setWeatherError(errorMessage);
+      setWeatherData(null);
+    } finally {
+      setWeatherLoading(false);
+    }
+  };
+
+  // Fallback to simulated data if weather not available
   const climate = getClimate(school.country);
   const zone = getClimateZone(school.country);
   const zMeta = CLIMATE_ZONE_META[zone];
@@ -1108,17 +1363,34 @@ function ContextCards({ school }) {
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 22 }} className="ecolens-grid-2">
       <GlassCard style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 16 }}>
         <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(232,163,61,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <WeatherIcon size={20} color={T.amber} />
+          {weatherData && weatherData.icon ? (
+            <>
+              {/* Weather icon from OpenWeather */}
+              <img
+                src={`https://openweathermap.org/img/wn/${weatherData.icon}@2x.png`}
+                alt={weatherData.description}
+                style={{ width: 20, height: 20 }}
+              />
+            </>
+          ) : (
+            <WeatherIcon size={20} color={T.amber} />
+          )}
         </div>
         <div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: T.mistDim, textTransform: "uppercase" }}>Simulated Climate Pulse</div>
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 600, color: T.cream, marginTop: 2 }}>
-            {school.city || "Local Environment"}, {climate.temp}°C
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: T.mistDim, textTransform: "uppercase" }}>
+            {weatherLoading ? "Loading weather..." : weatherError ? `Error: ${weatherError}` : "Climate Data"}
           </div>
-          <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 12.5, color: T.mist }}>{climate.condition} · RH {climate.humidity}%</div>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 600, color: T.cream, marginTop: 2 }}>
+            {school.city || "Local Environment"}
+            {weatherData ? `${weatherData.temp}°C` : `${climate.temp}°C`}
+          </div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 12.5, color: T.mist }}>
+            {weatherData ? `${weatherData.description} · RH ${weatherData.humidity}%` : `${climate.condition} · RH ${climate.humidity}%`}
+          </div>
         </div>
       </GlassCard>
 
+      {/* Second card remains unchanged - benchmark cohort zone */}
       <GlassCard style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 16 }}>
         <div style={{ width: 42, height: 42, borderRadius: 12, background: `${zMeta.color}1f`, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <MapIcon size={20} color={zMeta.color} />
@@ -1666,15 +1938,22 @@ function ReportModule({ school, result, recommendations, addedIds }) {
 /* ============================== MAIN DASHBOARD CONTAINER ============================== */
 function Dashboard() {
   const [school, setSchool] = useState({
-    name: "", city: "", country: "Qatar", students: "1240", area: "42000",
+    name: "", city: "", country: "", students: "1240", area: "42000",
     greenCover: "14", buildings: "6", busPct: "15", metroPct: "5",
     walkCyclePct: "10", carPct: "70", acHours: "11", waste: "medium",
     irrigation: "yes", irrigationType: "sprinkler", waterSource: "municipal",
     waterMetering: "no", waterLitersPerStudent: "55"
   });
 
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [submitted, setSubmitted] = useState(false);
   const [addedIds, setAddedIds] = useState([]);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const result = useMemo(() => {
     return runFootprintEngine(school);
@@ -1694,7 +1973,7 @@ function Dashboard() {
   };
 
   return (
-    <div style={{ maxWidth: 1240, margin: "0 auto", padding: "40px 24px" }}>
+    <div style={{ maxWidth: 1440, margin: "0 auto", padding: "40px 24px" }}>
       <div style={{ marginBottom: 32 }}>
         <Pill color={T.teal}>Intelligence Operational Deck</Pill>
         <h2 style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 32, fontWeight: 700, color: T.cream, marginTop: 12, marginBottom: 8 }}>
@@ -1705,8 +1984,8 @@ function Dashboard() {
         </p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: submitted ? "400px 1fr" : "1fr", gap: 28, alignItems: "start" }} className="ecolens-dash-grid">
-        <div>
+      <div style={{ display: "grid", gridTemplateColumns: submitted ? (windowWidth < 768 ? "1fr" : "380px 1fr") : "minmax(0, 640px)", gap: 28, alignItems: "start", justifyContent: submitted ? "stretch" : "center" }} className="ecolens-dash-grid">
+        <div style={submitted && windowWidth >= 768 ? { position: "sticky", top: 80, maxHeight: "calc(100vh - 100px)", overflowY: "auto" } : {}}>
           <SchoolForm school={school} setSchool={setSchool} onSubmit={handleSubmit} />
         </div>
         {submitted && (
